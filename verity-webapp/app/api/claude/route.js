@@ -3,9 +3,8 @@ import { checkRateLimit } from "../../../lib/rateLimit";
 
 const MAX_INPUT_CHARS = 20000;
 
-async function callCerebras(system, userText, maxTokens, apiKey) {
-  const model = process.env.CEREBRAS_MODEL || "llama-3.3-70b";
-  const upstream = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+async function callOpenAICompatible(baseUrl, model, system, userText, maxTokens, apiKey, providerName) {
+  const upstream = await fetch(baseUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -23,7 +22,7 @@ async function callCerebras(system, userText, maxTokens, apiKey) {
 
   if (!upstream.ok) {
     const detail = await upstream.text().catch(() => "");
-    throw new UpstreamError(upstream.status, detail, "cerebras", model);
+    throw new UpstreamError(upstream.status, detail, providerName, model);
   }
 
   const data = await upstream.json();
@@ -102,8 +101,7 @@ export async function POST(request) {
   }
 
   const clampedMaxTokens = Math.min(Math.max(parseInt(maxTokens, 10) || 1500, 200), 2000);
-
-  const provider = (process.env.AI_PROVIDER || "cerebras").toLowerCase();
+  const provider = (process.env.AI_PROVIDER || "groq").toLowerCase();
 
   try {
     let text;
@@ -111,33 +109,31 @@ export async function POST(request) {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
         console.error("[/api/claude] Missing ANTHROPIC_API_KEY");
-        return NextResponse.json(
-          { error: "Server is missing ANTHROPIC_API_KEY." },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: "Server is missing ANTHROPIC_API_KEY." }, { status: 500 });
       }
       text = await callAnthropic(system, userText, clampedMaxTokens, apiKey);
-    } else {
+    } else if (provider === "cerebras") {
       const apiKey = process.env.CEREBRAS_API_KEY;
       if (!apiKey) {
         console.error("[/api/claude] Missing CEREBRAS_API_KEY");
-        return NextResponse.json(
-          { error: "Server is missing CEREBRAS_API_KEY." },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: "Server is missing CEREBRAS_API_KEY." }, { status: 500 });
       }
-      text = await callCerebras(system, userText, clampedMaxTokens, apiKey);
+      const model = process.env.CEREBRAS_MODEL || "llama-3.3-70b";
+      text = await callOpenAICompatible("https://api.cerebras.ai/v1/chat/completions", model, system, userText, clampedMaxTokens, apiKey, "cerebras");
+    } else {
+      // groq (default) - free tier, no credit card required
+      const apiKey = process.env.GROQ_API_KEY;
+      if (!apiKey) {
+        console.error("[/api/claude] Missing GROQ_API_KEY");
+        return NextResponse.json({ error: "Server is missing GROQ_API_KEY." }, { status: 500 });
+      }
+      const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+      text = await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", model, system, userText, clampedMaxTokens, apiKey, "groq");
     }
     return NextResponse.json({ text });
   } catch (err) {
     if (err instanceof UpstreamError) {
-      // THIS is the line that was missing - it's the only way to see
-      // what the provider actually said. Check Vercel's function logs
-      // after reproducing the error and this will show up there.
-      console.error(
-        `[/api/claude] ${err.provider} (${err.model}) failed with status ${err.status}:`,
-        err.detail
-      );
+      console.error(`[/api/claude] ${err.provider} (${err.model}) failed with status ${err.status}:`, err.detail);
       const status = err.status === 429 ? 429 : 502;
       return NextResponse.json({ error: "Model request failed." }, { status });
     }
