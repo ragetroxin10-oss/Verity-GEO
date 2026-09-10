@@ -65,10 +65,10 @@ Any Node host that supports Next.js works. Two straightforward options:
 
 **Vercel** (easiest, generous free tier)
 1. Import the GitHub repo at https://vercel.com/new
-2. Add `CEREBRAS_API_KEY` and set `AI_PROVIDER=cerebras` (the default provider).
-   You can use `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`, or
-   `GROQ_API_KEY` with `AI_PROVIDER=groq` instead.
-3. Optionally add `CEREBRAS_MODEL`, `ANTHROPIC_MODEL`, `GROQ_MODEL`, and
+2. Add `GROQ_API_KEY` and set `AI_PROVIDER=groq` (the default in `.env.example`).
+   You can use `CEREBRAS_API_KEY` with `AI_PROVIDER=cerebras`, or
+   `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic` instead.
+3. Optionally add `GROQ_MODEL`, `CEREBRAS_MODEL`, `ANTHROPIC_MODEL`, and
    `RATE_LIMIT_PER_HOUR` (default 20)
 4. Deploy
 

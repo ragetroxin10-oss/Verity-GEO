@@ -4,21 +4,29 @@ import { checkRateLimit } from "../../../lib/rateLimit";
 const MAX_INPUT_CHARS = 20000;
 
 async function callOpenAICompatible(baseUrl, model, system, userText, maxTokens, apiKey, providerName) {
-  const upstream = await fetch(baseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + apiKey,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userText },
-      ],
-    }),
-  });
+  const tokenLimit = providerName === "groq"
+    ? { max_completion_tokens: maxTokens }
+    : { max_tokens: maxTokens };
+  let upstream;
+  try {
+    upstream = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        ...tokenLimit,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userText },
+        ],
+      }),
+    });
+  } catch (err) {
+    throw new UpstreamError(503, err?.message || "Network request failed", providerName, model);
+  }
 
   if (!upstream.ok) {
     const detail = await upstream.text().catch(() => "");
@@ -31,20 +39,25 @@ async function callOpenAICompatible(baseUrl, model, system, userText, maxTokens,
 
 async function callAnthropic(system, userText, maxTokens, apiKey) {
   const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
-  const upstream = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: userText }],
-    }),
-  });
+  let upstream;
+  try {
+    upstream = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: "user", content: userText }],
+      }),
+    });
+  } catch (err) {
+    throw new UpstreamError(503, err?.message || "Network request failed", "anthropic", model);
+  }
 
   if (!upstream.ok) {
     const detail = await upstream.text().catch(() => "");
@@ -74,6 +87,20 @@ class EmptyResponseError extends Error {
     this.provider = provider;
     this.model = model;
   }
+}
+
+function getProviderError(detail, provider, status) {
+  if (status === 503) {
+    return "Could not reach " + provider + ". Check the deployment network and try again.";
+  }
+  try {
+    const parsed = JSON.parse(detail);
+    const message = parsed?.error?.message || parsed?.message;
+    if (message) return provider + " rejected the request (" + status + "): " + message;
+  } catch {
+    // Some upstream failures are plain text rather than JSON.
+  }
+  return provider + " rejected the request (" + status + "). Check the API key, model, and quota.";
 }
 
 function getProvider() {
@@ -163,7 +190,7 @@ export async function POST(request) {
     if (err instanceof UpstreamError) {
       console.error(`[/api/claude] ${err.provider} (${err.model}) failed with status ${err.status}:`, err.detail);
       const status = err.status === 429 ? 429 : 502;
-      return NextResponse.json({ error: "Model request failed." }, { status });
+      return NextResponse.json({ error: getProviderError(err.detail, err.provider, err.status) }, { status });
     }
     if (err instanceof EmptyResponseError) {
       console.error(`[/api/claude] ${err.provider} (${err.model}) returned an empty response`);
