@@ -25,18 +25,36 @@ async function callClaude(system, userText, maxTokens) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, userText, maxTokens: maxTokens || 1800 }),
   });
+  const data = await response.json().catch(() => ({}));
   if (response.status === 429) throw new Error("RATE_LIMIT");
-  if (!response.ok) throw new Error("Request failed (" + response.status + ")");
-  const data = await response.json();
-  return data.text || "";
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed (" + response.status + ")");
+  }
+  if (typeof data.text !== "string" || !data.text.trim()) {
+    throw new Error("The AI provider returned an empty response. Check its API configuration.");
+  }
+  return data.text;
 }
 function parseJSON(text) {
-  return JSON.parse(text.replace(/```json/gi, "").replace(/```/g, "").trim());
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        // Fall through to a user-facing error instead of rendering a blank result.
+      }
+    }
+    throw new Error("The AI response was not valid JSON. Please try again.");
+  }
 }
 function rateAwareError(e, fallback) {
-  return e.message === "RATE_LIMIT"
-    ? "This app is rate-limited to keep it running for everyone \u2014 try again in a bit."
-    : fallback;
+  if (e.message === "RATE_LIMIT") return "This app is rate-limited to keep it running for everyone \u2014 try again in a bit.";
+  return e.message || fallback;
 }
 
 /* ---------- shared UI atoms ---------- */

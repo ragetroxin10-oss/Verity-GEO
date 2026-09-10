@@ -2,8 +2,9 @@
 
 An SEO + GEO (Generative Engine Optimization) toolkit: audit content, research
 keywords, compare competitors, and score/rewrite content for AI answer
-engines. Built with Next.js; the AI-backed modules call Claude through a
-small server-side API route so your API key never reaches the browser.
+engines. Built with Next.js; the AI-backed modules call your configured model
+provider through a small server-side API route so your API key never reaches
+the browser.
 
 **What's real vs. sample data:**
 - Real, calling Claude on every run: Site audit, Keywords (angles/intent),
@@ -64,8 +65,11 @@ Any Node host that supports Next.js works. Two straightforward options:
 
 **Vercel** (easiest, generous free tier)
 1. Import the GitHub repo at https://vercel.com/new
-2. Add an environment variable: `ANTHROPIC_API_KEY` = your key
-3. Optionally add `RATE_LIMIT_PER_HOUR` (default 20)
+2. Add `CEREBRAS_API_KEY` and set `AI_PROVIDER=cerebras` (the default provider).
+   You can use `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`, or
+   `GROQ_API_KEY` with `AI_PROVIDER=groq` instead.
+3. Optionally add `CEREBRAS_MODEL`, `ANTHROPIC_MODEL`, `GROQ_MODEL`, and
+   `RATE_LIMIT_PER_HOUR` (default 20)
 4. Deploy
 
 Note: Vercel runs this as serverless functions, and the built-in rate
@@ -120,7 +124,7 @@ If you expect meaningful traffic, consider:
 
 ```
 app/
-  api/claude/route.js   server route that calls the Anthropic API
+  api/claude/route.js   server route that calls the configured AI provider
   layout.js             root layout
   page.js                the whole app UI (single client component)
   globals.css

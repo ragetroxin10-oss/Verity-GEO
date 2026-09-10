@@ -68,6 +68,26 @@ class UpstreamError extends Error {
   }
 }
 
+class EmptyResponseError extends Error {
+  constructor(provider, model) {
+    super("The " + provider + " model returned an empty response.");
+    this.provider = provider;
+    this.model = model;
+  }
+}
+
+function getProvider() {
+  const configured = process.env.AI_PROVIDER?.trim().toLowerCase();
+  if (configured) return configured;
+
+  // The environment template uses Cerebras. Prefer whichever configured key
+  // is available when AI_PROVIDER was not added to the deployment.
+  if (process.env.CEREBRAS_API_KEY) return "cerebras";
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (process.env.GROQ_API_KEY) return "groq";
+  return "cerebras";
+}
+
 export async function POST(request) {
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
@@ -101,7 +121,7 @@ export async function POST(request) {
   }
 
   const clampedMaxTokens = Math.min(Math.max(parseInt(maxTokens, 10) || 1500, 200), 2000);
-  const provider = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  const provider = getProvider();
 
   try {
     let text;
@@ -120,8 +140,7 @@ export async function POST(request) {
       }
       const model = process.env.CEREBRAS_MODEL || "llama-3.3-70b";
       text = await callOpenAICompatible("https://api.cerebras.ai/v1/chat/completions", model, system, userText, clampedMaxTokens, apiKey, "cerebras");
-    } else {
-      // groq (default) - free tier, no credit card required
+    } else if (provider === "groq") {
       const apiKey = process.env.GROQ_API_KEY;
       if (!apiKey) {
         console.error("[/api/claude] Missing GROQ_API_KEY");
@@ -129,6 +148,15 @@ export async function POST(request) {
       }
       const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
       text = await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", model, system, userText, clampedMaxTokens, apiKey, "groq");
+    } else {
+      return NextResponse.json(
+        { error: "Unsupported AI_PROVIDER. Use cerebras, anthropic, or groq." },
+        { status: 500 }
+      );
+    }
+
+    if (!text || !text.trim()) {
+      throw new EmptyResponseError(provider, process.env[provider.toUpperCase() + "_MODEL"] || "default");
     }
     return NextResponse.json({ text });
   } catch (err) {
@@ -136,6 +164,10 @@ export async function POST(request) {
       console.error(`[/api/claude] ${err.provider} (${err.model}) failed with status ${err.status}:`, err.detail);
       const status = err.status === 429 ? 429 : 502;
       return NextResponse.json({ error: "Model request failed." }, { status });
+    }
+    if (err instanceof EmptyResponseError) {
+      console.error(`[/api/claude] ${err.provider} (${err.model}) returned an empty response`);
+      return NextResponse.json({ error: err.message }, { status: 502 });
     }
     console.error("[/api/claude] Unexpected error:", err);
     return NextResponse.json({ error: "Request to the model failed." }, { status: 500 });
